@@ -1,0 +1,64 @@
+#+TITLE: Installation Guide
+#+STARTUP: overview
+
+* Quick Installation
+
+** Clone the repository
+
+#+begin_src bash
+git clone https://github.com/mandoo180/zellij.el.git ~/.emacs.d/zellij.el
+#+end_src
+
+** Add to your Emacs configuration
+
+*** Basic setup
+
+#+begin_src elisp
+(add-to-list 'load-path "~/.emacs.d/zellij.el")
+(require 'zellij)
+(global-zellij-mode 1)
+#+end_src
+
+*** With use-package
+
+#+begin_src elisp
+(use-package zellij
+  :load-path "~/.emacs.d/zellij.el"
+  :config
+  (global-zellij-mode 1))
+#+end_src
+
+*** With Org-mode integration
+
+#+begin_src elisp
+(use-package zellij
+  :load-path "~/.emacs.d/zellij.el"
+  :config
+  (global-zellij-mode 1))
+
+(use-package zellij-org
+  :after (zellij org)
+  :config
+  (zellij-org-setup))
+#+end_src
+
+* Testing
+
+** Try it out
+
+1. Open a file in Emacs
+2. Press =M-x zellij-set-target-pane=
+3. Select a pane (AI CLIs will be auto-detected)
+4. Select some code
+5. Press =C-c z s= to send to Zellij
+
+** Check if it works
+
+#+begin_src elisp
+M-x zellij-available-p  ; Should return t
+M-x zellij-show-log     ; View log buffer
+#+end_src
+
+* Next Steps
+
+See README.org for complete documentation and examples.
