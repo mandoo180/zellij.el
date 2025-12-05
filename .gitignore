@@ -1,0 +1,18 @@
+# Emacs
+*~
+\#*\#
+.\#*
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Package
+*.tar
+*.tar.gz
+dist/
+build/

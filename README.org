@@ -1,0 +1,458 @@
+#+TITLE: zellij.el - Zellij Terminal Multiplexer Integration for Emacs
+#+AUTHOR: Kyeong Soo Choi
+#+STARTUP: overview
+
+* zellij.el
+
+Emacs integration for [[https://zellij.dev][Zellij]] terminal multiplexer with smart AI CLI detection.
+
+** Features
+
+- 📤 Send text/commands to specific Zellij panes
+- 🤖 *Auto-detect AI CLI tools* (Claude Code, OpenCode, Aider, Cursor, and more)
+- 📝 *Smart code block formatting* for AI interactions
+- 🎯 Buffer-local target tracking with mode-line indicator
+- 📂 Project-aware pane creation
+- 📋 Org-mode source block execution
+- 📊 Comprehensive logging
+
+** Why zellij.el?
+
+If you work with AI coding assistants like Claude Code or OpenCode in Zellij, this package makes it seamless to send code from Emacs directly to your AI CLI panes. The auto-detection and formatting features mean you can focus on coding while Emacs handles the interaction.
+
+** Installation
+
+*** Requirements
+
+- Emacs 27.1 or later
+- Zellij 0.40.0 or later
+- Optional: Org-mode 9.0+ for org integration
+
+*** Manual Installation
+
+#+begin_src bash
+git clone https://github.com/mandoo180/zellij.el.git
+#+end_src
+
+#+begin_src elisp
+(add-to-list 'load-path "/path/to/zellij.el")
+(require 'zellij)
+(global-zellij-mode 1)
+#+end_src
+
+*** use-package
+
+#+begin_src elisp
+(use-package zellij
+  :load-path "/path/to/zellij.el"
+  :config
+  (global-zellij-mode 1))
+#+end_src
+
+*** MELPA (Coming Soon)
+
+#+begin_src elisp
+(use-package zellij
+  :ensure t
+  :config
+  (global-zellij-mode 1))
+#+end_src
+
+** Quick Start
+
+*** Basic Workflow
+
+1. *Set a target pane* (with AI CLI auto-detection):
+   #+begin_src
+   M-x zellij-set-target-pane
+   #+end_src
+   - If AI CLIs are detected, you'll see: =Claude Code (Tab #8, Pane 0)=
+   - Select your target or choose "Manual selection..."
+
+2. *Send code to target*:
+   - Select region or use entire buffer
+   - Press =C-c z s= (or =M-x zellij-send-region-or-buffer=)
+   - Code is automatically formatted and sent!
+
+3. *Check mode-line*:
+   - Shows current target: =[Z:Claude Code]=
+
+*** Quick Send to AI
+
+If you just want to send code to any detected AI CLI:
+
+#+begin_src elisp
+M-x zellij-send-to-ai
+#+end_src
+
+This automatically finds the first AI CLI pane and sends your selection or prompts for text.
+
+** Configuration
+
+*** Basic Configuration
+
+#+begin_src elisp
+(use-package zellij
+  :custom
+  ;; AI CLI integration
+  (zellij-format-code-blocks t)        ; Auto-format code for AI CLIs
+  (zellij-auto-detect-language t)      ; Detect language from major-mode
+
+  ;; Pane creation
+  (zellij-default-pane-direction "right")
+  (zellij-use-project-root t)          ; Use project root as CWD
+  (zellij-prompt-for-pane-name t)
+
+  ;; UI
+  (zellij-enable-logging t)
+  (zellij-echo-commands nil)
+
+  :config
+  (global-zellij-mode 1))
+#+end_src
+
+*** Org-Mode Integration
+
+#+begin_src elisp
+(use-package zellij-org
+  :after (zellij org)
+  :config
+  (zellij-org-setup))  ; Auto-enable in org-mode buffers
+#+end_src
+
+*** Mode-Line Integration
+
+The mode-line indicator is automatically added. To customize its position:
+
+#+begin_src elisp
+;; Add to specific position in mode-line
+(setq mode-line-format
+      (append mode-line-format
+              '(zellij-mode-line-format)))
+#+end_src
+
+** Usage
+
+*** Keybindings
+
+All commands are prefixed with =C-c z=:
+
+**** Sending Commands
+- =C-c z s= - Send region or buffer
+- =C-c z l= - Send current line
+- =C-c z p= - Send current paragraph
+- =C-c z c= - Send command (prompt)
+- =C-c z a= - Send to AI (auto-detect)
+
+**** Target Management
+- =C-c z t= - Set target pane
+- =C-c z T= - Clear target pane
+- =C-c z ?= - Show current target
+
+**** Pane Creation
+- =C-c z n= - Create new pane with command
+
+**** Interactive
+- =C-c z g= - Interactive send to pane
+
+**** Utilities
+- =C-c z f= - Toggle code formatting
+- =C-c z L= - Show log buffer
+
+*** AI CLI Workflows
+
+**** Send Code to Claude Code / OpenCode
+
+#+begin_src elisp
+;; 1. Open a Python file
+;; 2. M-x zellij-set-target-pane
+;;    → Suggests: "Claude Code (Tab #8, Pane 0)"
+;; 3. Select code region
+;; 4. C-c z s
+
+;; The code is automatically formatted as:
+;; ```python
+;; def hello():
+;;     print("Hello from Emacs!")
+;; ```
+;; and sent to Claude Code!
+#+end_src
+
+**** Quick AI Interaction
+
+#+begin_src elisp
+;; Select code in any buffer
+;; M-x zellij-send-to-ai
+;; → Auto-finds Claude Code/OpenCode/Aider
+;; → Formats and sends code
+;; → "Sent to Claude Code"
+#+end_src
+
+**** Custom AI Commands
+
+#+begin_src elisp
+(defun my/ask-claude ()
+  "Send region or buffer to Claude Code with a question."
+  (interactive)
+  (let ((code (if (use-region-p)
+                 (buffer-substring-no-properties
+                  (region-beginning) (region-end))
+               (buffer-string)))
+        (question (read-string "Ask Claude: ")))
+    (zellij-send-to-ai (format "%s\n\n%s"
+                              question
+                              (zellij--format-as-code-block code)))))
+
+(global-set-key (kbd "C-c a c") #'my/ask-claude)
+#+end_src
+
+*** Org-Mode Integration
+
+**** Property-Based Targeting
+
+#+begin_src org
+,#+TITLE: My Project
+,#+PROPERTY: ZELLIJ_TAB 8
+,#+PROPERTY: ZELLIJ_PANE 0
+
+,* Development
+
+,** Run this in Claude Code
+
+,#+begin_src python
+import pandas as pd
+df = pd.read_csv('data.csv')
+print(df.head())
+,#+end_src
+#+end_src
+
+Execute with =M-x zellij-org-babel-execute= or =C-c z e= (in org-mode).
+
+**** Header Arguments
+
+#+begin_src org
+,#+begin_src python :zellij-tab 8 :zellij-pane 0
+print("Hello from Emacs!")
+,#+end_src
+#+end_src
+
+**** Per-Subtree Targeting
+
+#+begin_src org
+,* Claude Code Session
+:PROPERTIES:
+:ZELLIJ_TAB: 8
+:ZELLIJ_PANE: 0
+:END:
+
+,** Test 1
+,#+begin_src python
+print("Test 1")
+,#+end_src
+
+,** Test 2
+,#+begin_src python
+print("Test 2")
+,#+end_src
+#+end_src
+
+Both blocks will be sent to Tab 8, Pane 0.
+
+*** Advanced Usage
+
+**** Create Project-Aware Panes
+
+#+begin_src elisp
+;; Creates a new pane in project root and runs command
+(zellij-new-pane "npm run dev" "right" "Dev Server")
+#+end_src
+
+**** Manual Pane Targeting
+
+#+begin_src elisp
+;; Send to specific tab and pane
+(zellij-send-to-pane 2 0 "ls -la")  ; Tab 2, Pane 0
+#+end_src
+
+**** Toggle Code Formatting
+
+#+begin_src elisp
+;; Disable formatting for plain text
+M-x zellij-toggle-code-formatting
+#+end_src
+
+**** View Logs
+
+#+begin_src elisp
+M-x zellij-show-log  ; See all Zellij commands
+M-x zellij-clear-log ; Clear log buffer
+#+end_src
+
+** Customization
+
+*** AI CLI Detection
+
+Customize which AI CLIs to detect:
+
+#+begin_src elisp
+(setq zellij-ai-cli-patterns
+      '(("claude" . "Claude Code")        ; Highest priority
+        ("opencode" . "OpenCode")
+        ("aider" . "Aider")
+        ("cursor" . "Cursor")
+        ("copilot" . "GitHub Copilot")
+        ("my-ai-tool" . "My Custom AI")))
+#+end_src
+
+The order determines auto-detection priority.
+
+*** Code Formatting
+
+#+begin_src elisp
+;; Disable auto-formatting globally
+(setq zellij-format-code-blocks nil)
+
+;; Disable language detection
+(setq zellij-auto-detect-language nil)
+
+;; Custom language mapping
+(defun my/get-language ()
+  (pcase major-mode
+    ('my-mode "mylang")
+    (_ (zellij--get-language-for-mode))))
+
+(setq zellij-auto-detect-language nil)  ; Disable default
+;; Then wrap code manually or use custom function
+#+end_src
+
+*** Pane Creation
+
+#+begin_src elisp
+;; Custom pane name generator
+(setq zellij-default-pane-name-function
+      (lambda (cmd)
+        (when cmd
+          (concat "🚀 " (car (split-string cmd))))))
+
+;; Don't prompt for names
+(setq zellij-prompt-for-pane-name nil)
+
+;; Default to down split
+(setq zellij-default-pane-direction "down")
+#+end_src
+
+** Troubleshooting
+
+*** Zellij Not Detected
+
+#+begin_src elisp
+;; Check if Zellij is available
+(zellij-available-p)  ; Should return non-nil
+
+;; Set custom path if needed
+(setq zellij-executable "/custom/path/to/zellij")
+#+end_src
+
+*** AI Panes Not Found
+
+#+begin_src elisp
+;; Check what Zellij sees
+M-x zellij-show-log  ; Check layout parsing
+
+;; Manually verify
+(zellij--detect-ai-panes)  ; Should return list of AI panes
+#+end_src
+
+*** Commands Not Reaching Target
+
+#+begin_src elisp
+;; Enable logging to debug
+(setq zellij-enable-logging t)
+(setq zellij-echo-commands t)
+
+;; Check log
+M-x zellij-show-log
+#+end_src
+
+*** Code Not Formatted
+
+#+begin_src elisp
+;; Verify settings
+zellij-format-code-blocks       ; Should be t
+zellij-auto-detect-language     ; Should be t
+
+;; Check if target is an AI pane
+(zellij--should-format-as-code zellij-target-pane)  ; Should return t
+#+end_src
+
+** Examples
+
+See =examples/zellij-config.el= for a complete configuration example.
+
+** API Reference
+
+*** Core Functions
+
+- =(zellij-send-command COMMAND &optional SESSION)= - Send command to focused pane
+- =(zellij-send-text TEXT &optional SESSION)= - Send text without newline
+- =(zellij-send-to-pane TAB PANE-OFFSET COMMAND &optional SESSION)= - Send to specific pane
+
+*** Target Management
+
+- =(zellij-set-target-pane)= - Set buffer-local target with AI detection
+- =(zellij-clear-target-pane)= - Clear target
+- =(zellij-show-target)= - Display current target
+
+*** AI Functions
+
+- =(zellij-send-to-ai TEXT)= - Send to first detected AI CLI
+- =(zellij--detect-ai-panes &optional SESSION)= - Get list of AI panes
+- =(zellij-toggle-code-formatting)= - Toggle code block formatting
+
+*** Pane Creation
+
+- =(zellij-new-pane &optional COMMAND DIRECTION NAME CWD SESSION)= - Create new pane
+- =(zellij-new-pane-with-command)= - Interactive pane creation
+
+*** Org-Mode (zellij-org.el)
+
+- =(zellij-org-babel-execute)= - Execute source block in Zellij
+- =(zellij-org-send-block)= - Send block without execution
+- =(zellij-org-setup)= - Enable org integration
+
+** Roadmap
+
+- [ ] MELPA submission
+- [ ] Enhanced pane name-based targeting
+- [ ] Async send for large buffers
+- [ ] Results capture from Zellij panes (for org-babel)
+- [ ] Integration with other modes (magit, eshell)
+- [ ] Session management UI
+- [ ] Multiple target bookmarks
+
+** Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+** License
+
+GPL-3.0 - See LICENSE file for details.
+
+** Acknowledgments
+
+- [[https://zellij.dev][Zellij]] - Modern terminal multiplexer
+- Inspired by similar integrations for tmux and screen
+- Thanks to the Emacs community
+
+** Author
+
+Kyeong Soo Choi
+
+- GitHub: [[https://github.com/mandoo180][@mandoo180]]
+- Website: [[https://mandoo180.github.io]]

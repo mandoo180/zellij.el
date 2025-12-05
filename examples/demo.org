@@ -1,0 +1,40 @@
+#+TITLE: Zellij.el Demo
+#+PROPERTY: ZELLIJ_TAB 8
+#+PROPERTY: ZELLIJ_PANE 0
+
+* Setup
+
+Set the target tab and pane using properties above, or use:
+: M-x zellij-set-target-pane
+
+* Examples
+
+** Python Code
+
+#+begin_src python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+print([fibonacci(i) for i in range(10)])
+#+end_src
+
+Execute with: =C-c z e=
+
+** JavaScript Code
+
+#+begin_src javascript
+const greet = (name) => {
+  console.log(`Hello, ${name}!`);
+};
+
+greet("Emacs");
+#+end_src
+
+** Using Header Arguments
+
+#+begin_src python :zellij-tab 9 :zellij-pane 1
+# This goes to a different pane
+print("Different pane!")
+#+end_src

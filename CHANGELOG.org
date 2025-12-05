@@ -1,0 +1,19 @@
+#+TITLE: Changelog
+#+STARTUP: overview
+
+* Version 0.0.1 (2025-01-05)
+
+Initial release.
+
+** Features
+
+- Core Zellij integration
+- Send commands to specific tabs and panes
+- AI CLI auto-detection (Claude Code, OpenCode, Aider, Cursor, etc.)
+- Smart code block formatting for AI interactions
+- Buffer-local target pane tracking
+- Mode-line indicator
+- Project-aware pane creation
+- Org-mode source block execution
+- Comprehensive logging
+- Minor mode with keybindings
