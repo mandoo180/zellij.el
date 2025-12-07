@@ -179,10 +179,11 @@ Priority: SESSION > `zellij-default-session' > current session."
     (let ((msg (apply #'format format-string args))
           (buf (get-buffer-create zellij-log-buffer-name)))
       (with-current-buffer buf
-        (goto-char (point-max))
-        (insert (format "[%s] %s\n"
-                       (format-time-string "%Y-%m-%d %H:%M:%S")
-                       msg))))))
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert (format "[%s] %s\n"
+                         (format-time-string "%Y-%m-%d %H:%M:%S")
+                         msg)))))))
 
 (defun zellij--error (format-string &rest args)
   "Display error message and log it."
@@ -224,10 +225,12 @@ Call CALLBACK with output when done."
     proc))
 
 (defun zellij--get-working-directory ()
-  "Return appropriate working directory for new panes."
-  (if (and zellij-use-project-root (project-current))
-      (project-root (project-current))
-    default-directory))
+  "Return appropriate working directory for new panes.
+Returns absolute path with ~ expanded."
+  (expand-file-name
+   (if (and zellij-use-project-root (project-current))
+       (project-root (project-current))
+     default-directory)))
 
 (defun zellij--default-pane-name (command)
   "Generate default pane name from COMMAND."
@@ -377,15 +380,48 @@ Call CALLBACK with output when done."
 
 (defun zellij--navigate-to-pane (tab pane-offset &optional session)
   "Navigate to TAB and focus pane at PANE-OFFSET.
+TAB can be either a tab index (number) or tab name (string).
 Returns non-nil on success."
   (zellij--log "Navigating to tab %s, pane offset %d" tab pane-offset)
   ;; Go to tab
   (let ((tab-result (zellij-go-to-tab tab session)))
     (when (zerop (car tab-result))
-      ;; Focus pane by cycling
-      (dotimes (_ pane-offset)
-        (zellij-focus-next-pane session))
-      t)))
+      ;; Longer delay to ensure Zellij updates focus after tab switch
+      (sleep-for 0.2)
+      ;; Get current layout to find focused pane in target tab
+      (let* ((layout (zellij--parse-layout session))
+             (target-tab (cl-find-if (lambda (t-info)
+                                      (if (numberp tab)
+                                          (= (nth 0 t-info) tab)
+                                        (equal (nth 1 t-info) tab)))
+                                    layout)))
+        (if target-tab
+            (let* ((panes (nth 3 target-tab))
+                   (current-pane-offset (or (cl-position-if (lambda (pane)
+                                                             (nth 2 pane)) ; focused-p
+                                                           panes)
+                                           0))) ; Default to first pane if none focused
+              (zellij--log "Tab has %d panes, focused pane: %s"
+                          (length panes)
+                          current-pane-offset)
+              ;; Calculate how many times to cycle
+              (let ((cycles-needed (mod (- pane-offset current-pane-offset)
+                                       (length panes))))
+                (zellij--log "Current pane: %d, Target pane: %d, Cycles: %d"
+                           current-pane-offset pane-offset cycles-needed)
+                ;; Cycle to target pane with delay between each cycle
+                (dotimes (i cycles-needed)
+                  (zellij-focus-next-pane session)
+                  (when (< i (1- cycles-needed))
+                    ;; Small delay between cycles (except after the last one)
+                    (sleep-for 0.05)))
+                ;; Final delay to ensure last focus command completes
+                (when (> cycles-needed 0)
+                  (sleep-for 0.1))
+                t))
+          ;; Target tab not found
+          (zellij--log "ERROR: Target tab not found: %s" tab)
+          nil)))))
 
 ;;;; Layout Parsing
 
@@ -423,28 +459,79 @@ Returns: ((tab-index tab-name focused-p (pane-info...))...)"
 
 (defun zellij--parse-panes-in-region (start end)
   "Parse panes in region between START and END.
-Returns list of pane info: (command args focus-p)."
+Returns list of pane info: (command args focus-p).
+Only counts real terminal panes, skipping plugins and containers."
   (let ((panes '()))
     (save-excursion
       (goto-char start)
-      (while (re-search-forward "pane\\(.*\\){" end t)
+      ;; Match both "pane attrs {" and bare "pane attrs" (no braces)
+      (while (re-search-forward "^[ \t]*pane\\([^{}\n]*\\)\\({\\|$\\)" end t)
         (let* ((pane-attrs (match-string 1))
+               (has-braces (string= (match-string 2) "{"))
                (focused-p (string-match-p "focus=true" pane-attrs))
+               (pane-content "")
+               (is-plugin nil)
+               (is-container nil)
                (command nil)
                (args nil))
-          ;; Check if this is a plugin pane (skip it)
-          (unless (string-match-p "plugin" pane-attrs)
-            ;; Look for command
+
+          ;; For panes with braces, read content to check for plugins
+          (when has-braces
+            (let ((pane-start (point))
+                  (pane-end (save-excursion
+                             (backward-char 1)
+                             (forward-sexp)
+                             (point))))
+              (setq pane-content (buffer-substring-no-properties pane-start pane-end))
+              (setq is-plugin (string-match-p "plugin location=" pane-content))
+              (setq is-container (and (string-match-p "split_direction=" pane-attrs)
+                                     (not (string-match "command=\"\\([^\"]+\\)\"" pane-attrs))))))
+
+          ;; Only process real terminal panes
+          (unless (or is-plugin is-container)
+            ;; Extract command if present
             (when (string-match "command=\"\\([^\"]+\\)\"" pane-attrs)
               (setq command (match-string 1 pane-attrs)))
-            ;; Look for args
-            (save-excursion
-              (when (re-search-forward "args \"\\([^\"]+\\)\"" end t)
-                (setq args (match-string 1))))
-            ;; Only add non-plugin panes
-            (when (or command (not (string-match-p "plugin" pane-attrs)))
-              (push (list command args focused-p) panes))))))
+
+            ;; Extract args if present (look in content if available, else attrs)
+            (when (string-match "args \"\\([^\"]+\\)\"" pane-content)
+              (setq args (match-string 1 pane-content)))
+
+            ;; Add to pane list
+            (push (list command args focused-p) panes)))))
     (nreverse panes)))
+
+;;;; Pane Status and Detection
+
+(defun zellij--get-focused-pane (&optional session)
+  "Get currently focused pane coordinates.
+Returns: (tab-name pane-offset) or nil if not found."
+  (let ((layout (zellij--parse-layout session)))
+    (cl-loop for tab in layout
+             when (nth 2 tab)  ; focused tab
+             return
+             (let* ((tab-name (nth 1 tab))
+                    (panes (nth 3 tab))
+                    (pane-offset 0)
+                    (focused-offset nil))
+               (dolist (pane panes)
+                 (when (nth 2 pane)  ; focused pane
+                   (setq focused-offset pane-offset))
+                 (cl-incf pane-offset))
+               (when focused-offset
+                 (list tab-name focused-offset))))))
+
+(defun zellij--pane-exists-p (tab pane-offset &optional session)
+  "Check if pane at TAB and PANE-OFFSET still exists in SESSION.
+TAB can be either a tab index (number) or tab name (string)."
+  (let ((layout (zellij--parse-layout session)))
+    (when-let ((tab-info (cl-find-if (lambda (t-info)
+                                       (if (numberp tab)
+                                           (= (nth 0 t-info) tab)
+                                         (equal (nth 1 t-info) tab)))
+                                     layout)))
+      (let ((panes (nth 3 tab-info)))
+        (< pane-offset (length panes))))))
 
 ;;;; AI CLI Detection
 
@@ -487,14 +574,68 @@ Returns: ((description . target)...)."
                       (list session tab-index pane-offset ai-name))))
             ai-panes)))
 
+(defun zellij--get-all-panes-for-selection (&optional session)
+  "Get list of all tabs and panes for selection.
+Returns: ((description . target)...) where target is
+(SESSION TAB-NAME PANE-OFFSET DESCRIPTION)."
+  (let ((layout (zellij--parse-layout session))
+        (ai-panes-map (make-hash-table :test 'equal))
+        (choices '()))
+    ;; Build map of AI panes for quick lookup
+    (dolist (ai-pane (zellij--detect-ai-panes session))
+      (let ((key (format "%d-%d" (nth 0 ai-pane) (nth 1 ai-pane))))
+        (puthash key (nth 2 ai-pane) ai-panes-map)))
+
+    ;; Build choice list with all panes
+    (dolist (tab layout)
+      (let ((tab-index (nth 0 tab))
+            (tab-name (nth 1 tab))
+            (tab-focused (nth 2 tab))
+            (panes (nth 3 tab))
+            (pane-offset 0))
+        (dolist (pane panes)
+          (let* ((command (nth 0 pane))
+                 ;; args (nth 1 pane) - not currently used
+                 (pane-focused (nth 2 pane))
+                 (key (format "%d-%d" tab-index pane-offset))
+                 (ai-name (gethash key ai-panes-map))
+                 ;; Build description
+                 (pane-desc (cond
+                            (ai-name (format "[AI: %s]" ai-name))
+                            (command (format "[%s]" command))
+                            (t "[shell]")))
+                 (focus-marker (cond
+                               ((and tab-focused pane-focused) " *")
+                               (pane-focused " •")
+                               (t "")))
+                 (description (format "%s | Pane %d %s%s"
+                                     tab-name pane-offset pane-desc focus-marker))
+                 (target-desc (if ai-name
+                                 ai-name
+                               (format "%s, Pane %d" tab-name pane-offset))))
+            (push (cons description
+                       (list session tab-name pane-offset target-desc))
+                  choices))
+          (cl-incf pane-offset))))
+    (nreverse choices)))
+
 (defun zellij--should-format-as-code (target)
-  "Return non-nil if TARGET is an AI CLI pane."
+  "Return non-nil if TARGET is an AI CLI pane.
+TARGET is (SESSION TAB PANE-OFFSET ...) where TAB can be index or name."
   (when (and zellij-format-code-blocks target)
-    (let* ((tab (nth 1 target))
+    (let* ((session (nth 0 target))
+           (tab (nth 1 target))
            (pane (nth 2 target))
-           (ai-panes (zellij--detect-ai-panes (nth 0 target))))
+           (layout (zellij--parse-layout session))
+           (ai-panes (zellij--detect-ai-panes session))
+           ;; Find tab index if tab is a name
+           (tab-index (if (numberp tab)
+                         tab
+                       (cl-loop for tab-info in layout
+                               when (equal (nth 1 tab-info) tab)
+                               return (nth 0 tab-info)))))
       (cl-some (lambda (ai-pane)
-                 (and (= (nth 0 ai-pane) tab)
+                 (and (= (nth 0 ai-pane) tab-index)
                       (= (nth 1 ai-pane) pane)))
                ai-panes))))
 
@@ -560,15 +701,75 @@ CWD: working directory (default from `zellij--get-working-directory')"
          (cmd (if (string-empty-p command) nil command)))
     (zellij-new-pane cmd direction)))
 
+(defun zellij-new-tab (&optional name cwd layout session)
+  "Create new tab in SESSION.
+NAME: optional tab name
+CWD: working directory
+LAYOUT: optional layout file path (default: \"default\")
+SESSION: session name (default current)
+
+Note: If NAME or CWD is specified, LAYOUT defaults to \"default\"."
+  (interactive)
+  (let* ((tab-name (or name
+                      (when (called-interactively-p 'any)
+                        (let ((input (read-string "Tab name (optional): ")))
+                          (unless (string-empty-p input) input)))))
+         ;; Only use CWD if explicitly provided (not when called interactively)
+         ;; Expand path to ensure absolute path without ~
+         (tab-cwd (when cwd (expand-file-name cwd)))
+         ;; If name or cwd is specified, we need a layout (Zellij requirement)
+         (tab-layout (cond
+                     (layout layout)
+                     ((or tab-name tab-cwd) "default")
+                     (t nil)))
+         (args (append
+                (when session (list "--session" session))
+                (list "action" "new-tab")
+                (when tab-layout (list "--layout" tab-layout))
+                (when tab-name (list "--name" tab-name))
+                (when tab-cwd (list "--cwd" tab-cwd)))))
+    (let ((result (zellij--call args)))
+      (if (zerop (car result))
+          (message "Created new tab%s"
+                   (if tab-name (format ": %s" tab-name) ""))
+        (zellij--error "Failed to create tab: %s" (cdr result))))))
+
+(defun zellij-new-tab-with-name ()
+  "Interactively create new tab with optional name."
+  (interactive)
+  (let ((name (read-string "Tab name (leave empty for default): ")))
+    (zellij-new-tab (if (string-empty-p name) nil name))))
+
 ;;;; Target Pane Management
 
 (defun zellij--get-target (&optional specified-target)
   "Return target pane to use.
-Priority: SPECIFIED-TARGET > buffer-local > current pane."
-  (or specified-target
-      zellij-target-pane
-      ;; Default: current session, current tab, current pane
-      (list nil nil 0)))
+Priority: SPECIFIED-TARGET > buffer-local > current pane.
+If no target is set, auto-detects and sets the current focused pane."
+  (zellij--log "=== GET TARGET ===")
+  (zellij--log "specified-target: %s" specified-target)
+  (zellij--log "zellij-target-pane (buffer-local): %s" zellij-target-pane)
+  (let ((result
+         (or specified-target
+             zellij-target-pane
+             ;; Auto-detect current pane and set as target
+             (when-let ((focused (zellij--get-focused-pane)))
+               (zellij--log "Auto-detected focused pane: %s" focused)
+               (setq zellij-target-pane
+                     (list nil (nth 0 focused) (nth 1 focused))
+                     zellij-target-pane-description
+                     (format "%s, Pane %d" (nth 0 focused) (nth 1 focused)))
+               (message "Auto-set target to current pane: %s" zellij-target-pane-description)
+               (force-mode-line-update)
+               zellij-target-pane)
+             ;; Fallback to first tab if detection fails
+             (let ((layout (zellij--parse-layout nil)))
+               (when layout
+                 (let ((first-tab (car layout)))
+                   (zellij--log "Fallback to first tab: %s" (nth 1 first-tab))
+                   (list nil (nth 1 first-tab) 0)))))))
+    (zellij--log "Final target: %s" result)
+    result))
 
 (defun zellij--set-target-manual ()
   "Manually set target pane by prompting for session/tab/pane."
@@ -585,28 +786,27 @@ Priority: SPECIFIED-TARGET > buffer-local > current pane."
                                                  tab pane-offset))))
 
 (defun zellij-set-target-pane ()
-  "Set buffer-local target pane with AI CLI auto-detection."
+  "Set buffer-local target pane by selecting from all available panes.
+Shows all tabs and panes with their commands.
+AI CLI panes are marked with [AI: name].
+The currently focused pane is marked with *."
   (interactive)
-  (let ((ai-panes (zellij--get-ai-pane-suggestions)))
-    (if ai-panes
-        ;; Offer AI panes as suggestions
-        (let* ((choices (append ai-panes
-                               '(("Manual selection..." . manual))))
-               (choice (completing-read "Target pane: "
-                                       (mapcar #'car choices)
-                                       nil t)))
-          (if (string= choice "Manual selection...")
-              (zellij--set-target-manual)
-            ;; Use selected AI pane
-            (let ((target (cdr (assoc choice choices))))
-              (setq zellij-target-pane (list (nth 0 target)
-                                            (nth 1 target)
-                                            (nth 2 target))
-                    zellij-target-pane-description (nth 3 target))
-              (message "Target set to: %s" zellij-target-pane-description))))
-      ;; No AI panes found, use manual selection
-      (zellij--set-target-manual))
-    (force-mode-line-update)))
+  (let ((all-panes (zellij--get-all-panes-for-selection)))
+    (if all-panes
+        (let* ((choice (completing-read "Select target pane: "
+                                       (mapcar #'car all-panes)
+                                       nil t))
+               (target (cdr (assoc choice all-panes))))
+          (setq zellij-target-pane (list (nth 0 target)
+                                        (nth 1 target)
+                                        (nth 2 target))
+                zellij-target-pane-description (nth 3 target))
+          (message "Target set to: %s" zellij-target-pane-description)
+          (force-mode-line-update))
+      ;; No panes found, use manual selection
+      (message "No panes detected in Zellij")
+      (zellij--set-target-manual)
+      (force-mode-line-update))))
 
 (defun zellij-clear-target-pane ()
   "Clear buffer-local target pane setting."
@@ -624,18 +824,63 @@ Priority: SPECIFIED-TARGET > buffer-local > current pane."
                                (format "%s" zellij-target-pane)))
     (message "No target set (using current pane)")))
 
+(defun zellij-list-panes ()
+  "Display list of all Zellij tabs and panes in a buffer."
+  (interactive)
+  (let ((all-panes (zellij--get-all-panes-for-selection))
+        (buf (get-buffer-create "*Zellij Panes*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "Zellij Tabs and Panes\n")
+        (insert "======================\n\n")
+        (if all-panes
+            (dolist (pane all-panes)
+              (insert (format "%s\n" (car pane))))
+          (insert "No panes detected.\n"))
+        (insert "\nLegend:\n")
+        (insert "  [AI: name] - AI CLI tool detected\n")
+        (insert "  [command]  - Running command\n")
+        (insert "  [shell]    - Shell pane\n")
+        (insert "  *          - Currently focused pane\n")
+        (insert "  •          - Focused in tab\n"))
+      (goto-char (point-min))
+      (unless (eq major-mode 'special-mode)
+        (special-mode)))
+    (display-buffer buf)))
+
 ;;;; Region/Buffer Sending
 
 (defun zellij--send-to-target (text target)
-  "Send TEXT to TARGET pane with optional formatting."
+  "Send TEXT to TARGET pane with optional formatting.
+Validates that the target pane exists and clears it if not."
   (let* ((session (nth 0 target))
          (tab (nth 1 target))
          (pane-offset (nth 2 target))
          (formatted-text (if (zellij--should-format-as-code target)
                             (zellij--format-as-code-block text)
                           text)))
-    (when (zellij--navigate-to-pane tab pane-offset session)
-      (zellij-send-command formatted-text session))))
+    (zellij--log "=== SEND TO TARGET ===")
+    (zellij--log "Target: session=%s tab=%s pane=%d" session tab pane-offset)
+    (zellij--log "zellij-target-pane buffer-local value: %s" zellij-target-pane)
+    ;; Validate pane exists
+    (if (zellij--pane-exists-p tab pane-offset session)
+        (progn
+          (zellij--log "Pane exists, navigating...")
+          (when (zellij--navigate-to-pane tab pane-offset session)
+            ;; Small delay to ensure navigation completed
+            (sleep-for 0.05)
+            (zellij--log "Sending command to focused pane")
+            (zellij-send-command formatted-text session)))
+      ;; Pane no longer exists - clear target
+      (zellij--log "ERROR: Pane does not exist!")
+      (when (and zellij-target-pane
+                 (equal zellij-target-pane target))
+        (setq zellij-target-pane nil
+              zellij-target-pane-description nil)
+        (force-mode-line-update))
+      (zellij--error "Target pane (Tab %s, Pane %d) no longer exists. Target cleared."
+                     tab pane-offset))))
 
 (defun zellij-send-region (start end &optional target)
   "Send region between START and END to TARGET or buffer-local target."
@@ -776,9 +1021,13 @@ Priority: SPECIFIED-TARGET > buffer-local > current pane."
     (define-key map (kbd "C-c z t") #'zellij-set-target-pane)
     (define-key map (kbd "C-c z T") #'zellij-clear-target-pane)
     (define-key map (kbd "C-c z ?") #'zellij-show-target)
+    (define-key map (kbd "C-c z i") #'zellij-list-panes)
 
     ;; Pane creation
     (define-key map (kbd "C-c z n") #'zellij-new-pane-with-command)
+
+    ;; Tab creation
+    (define-key map (kbd "C-c z N") #'zellij-new-tab-with-name)
 
     ;; Interactive
     (define-key map (kbd "C-c z g") #'zellij-send-to-pane-interactive)

@@ -62,20 +62,26 @@ git clone https://github.com/mandoo180/zellij.el.git
 
 *** Basic Workflow
 
-1. *Set a target pane* (with AI CLI auto-detection):
+1. *Set a target pane*:
    #+begin_src
    M-x zellij-set-target-pane
    #+end_src
-   - If AI CLIs are detected, you'll see: =Claude Code (Tab #8, Pane 0)=
-   - Select your target or choose "Manual selection..."
+   - Shows all tabs and panes with their commands
+   - AI CLIs are marked: =Tab 2: ai | Pane 0 [AI: Claude Code] *=
+   - Currently focused pane is marked with =*=
+   - Select any pane from the list
 
 2. *Send code to target*:
    - Select region or use entire buffer
    - Press =C-c z s= (or =M-x zellij-send-region-or-buffer=)
+   - If no target is set, automatically uses current focused pane
    - Code is automatically formatted and sent!
 
 3. *Check mode-line*:
    - Shows current target: =[Z:Claude Code]=
+
+4. *View all panes* (optional):
+   - Press =C-c z i= to see all tabs and panes in a buffer
 
 *** Quick Send to AI
 
@@ -92,24 +98,34 @@ This automatically finds the first AI CLI pane and sends your selection or promp
 *** Basic Configuration
 
 #+begin_src elisp
-(use-package zellij
-  :custom
-  ;; AI CLI integration
-  (zellij-format-code-blocks t)        ; Auto-format code for AI CLIs
-  (zellij-auto-detect-language t)      ; Detect language from major-mode
+  (use-package zellij
+    :custom
+    ;; AI CLI integration
+    (zellij-format-code-blocks t)        ; Auto-format code for AI CLIs
+    (zellij-auto-detect-language t)      ; Detect language from major-mode
 
-  ;; Pane creation
-  (zellij-default-pane-direction "right")
-  (zellij-use-project-root t)          ; Use project root as CWD
-  (zellij-prompt-for-pane-name t)
+    ;; Pane creation
+    (zellij-default-pane-direction "right")
+    (zellij-use-project-root t)          ; Use project root as CWD (default: t)
+    (zellij-prompt-for-pane-name t)      ; Prompt for pane names (default: t)
 
-  ;; UI
-  (zellij-enable-logging t)
-  (zellij-echo-commands nil)
+    ;; UI
+    (zellij-enable-logging t)
+    (zellij-echo-commands nil)
 
-  :config
-  (global-zellij-mode 1))
+    :config
+    (global-zellij-mode 1))
 #+end_src
+
+*** Working Directory Behavior
+
+When creating new panes or tabs, zellij.el automatically determines the working directory:
+
+- If =zellij-use-project-root= is =t= (default): Uses the project root directory
+- Falls back to =default-directory= if not in a project
+- All paths are expanded to absolute paths (resolving =~=)
+
+This ensures new panes start in your project directory, not your home directory.
 
 *** Org-Mode Integration
 
@@ -145,12 +161,16 @@ All commands are prefixed with =C-c z=:
 - =C-c z a= - Send to AI (auto-detect)
 
 **** Target Management
-- =C-c z t= - Set target pane
+- =C-c z t= - Set target pane (shows all panes)
 - =C-c z T= - Clear target pane
 - =C-c z ?= - Show current target
+- =C-c z i= - List all panes in buffer
 
 **** Pane Creation
 - =C-c z n= - Create new pane with command
+
+**** Tab Creation
+- =C-c z N= - Create new tab with name
 
 **** Interactive
 - =C-c z g= - Interactive send to pane
@@ -363,6 +383,21 @@ M-x zellij-show-log  ; Check layout parsing
 (zellij--detect-ai-panes)  ; Should return list of AI panes
 #+end_src
 
+*** Target Pane Closed or Not Found
+
+If you close a pane in Zellij, zellij.el will automatically detect it:
+
+#+begin_src elisp
+;; When you try to send to a closed pane, you'll see:
+;; "Target pane (Tab X, Pane Y) no longer exists. Target cleared."
+
+;; The target is automatically cleared, set a new one:
+M-x zellij-set-target-pane
+
+;; Or just send - it will auto-set to current focused pane
+C-c z s
+#+end_src
+
 *** Commands Not Reaching Target
 
 #+begin_src elisp
@@ -372,6 +407,9 @@ M-x zellij-show-log  ; Check layout parsing
 
 ;; Check log
 M-x zellij-show-log
+
+;; List all current panes to verify
+M-x zellij-list-panes
 #+end_src
 
 *** Code Not Formatted
@@ -399,9 +437,10 @@ See =examples/zellij-config.el= for a complete configuration example.
 
 *** Target Management
 
-- =(zellij-set-target-pane)= - Set buffer-local target with AI detection
+- =(zellij-set-target-pane)= - Set buffer-local target (shows all panes)
 - =(zellij-clear-target-pane)= - Clear target
 - =(zellij-show-target)= - Display current target
+- =(zellij-list-panes)= - Display all tabs and panes in a buffer
 
 *** AI Functions
 
@@ -413,6 +452,11 @@ See =examples/zellij-config.el= for a complete configuration example.
 
 - =(zellij-new-pane &optional COMMAND DIRECTION NAME CWD SESSION)= - Create new pane
 - =(zellij-new-pane-with-command)= - Interactive pane creation
+
+*** Tab Creation
+
+- =(zellij-new-tab &optional NAME CWD LAYOUT SESSION)= - Create new tab
+- =(zellij-new-tab-with-name)= - Interactive tab creation
 
 *** Org-Mode (zellij-org.el)
 

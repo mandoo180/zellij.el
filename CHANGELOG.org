@@ -1,6 +1,40 @@
 #+TITLE: Changelog
 #+STARTUP: overview
 
+* Unreleased
+
+** Bugfixes
+
+- Fixed layout parser incorrectly counting plugin panes (tab-bar, status-bar) as real panes
+- Fixed layout parser counting container panes with =split_direction= as actual panes
+- Parser now correctly matches terminal's pane count by skipping infrastructure panes
+- Fixed new panes/tabs starting in home directory instead of project root
+  - Now properly expands paths to absolute paths (resolving ~)
+- Fixed pane navigation not reaching correct target pane
+  - **Critical fix**: Changed from using tab indices to tab names for navigation
+  - =zellij action go-to-tab= with indices was unreliable, now using =go-to-tab-name=
+  - Now parses layout to find current focused pane and calculates correct cycle count
+  - Added timing delays to ensure Zellij processes tab switches and pane focus commands
+  - Added enhanced logging to track navigation flow
+  - **CRITICAL**: Fixed race condition where navigation would silently fail if no pane was focused after tab switch
+  - Increased tab switch delay from 0.1s to 0.2s for more reliable focus detection
+  - Navigation now defaults to pane 0 if no focused pane is detected (instead of failing)
+  - Added explicit error handling for when target tab is not found
+- Fixed read-only buffer error when logging to =*Zellij Log*= buffer
+  - Log function now properly disables read-only mode when writing
+
+** Features
+
+- Auto-set target pane to current focused pane on first send
+- Pane validation before sending to detect closed panes
+- Automatic target clearing when pane no longer exists
+- Enhanced pane selection: =zellij-set-target-pane= now shows ALL tabs and panes
+- New command =zellij-list-panes= (=C-c z i=) to view all available panes
+- AI CLI panes are marked with =[AI: name]= prefix in pane selection
+- Currently focused pane is marked with =*= in pane selection
+- Simplified display format: shows tab names directly instead of "Tab 0: Tab #8"
+- Tab creation: =zellij-new-tab= and =zellij-new-tab-with-name= (=C-c z N=)
+
 * Version 0.0.1 (2025-01-05)
 
 Initial release.
