@@ -68,8 +68,9 @@ Returns: (SESSION TAB PANE-OFFSET) or nil."
         (pane (org-entry-get nil "ZELLIJ_PANE" t)))
     (when (and tab pane)
       (list session
+            ;; If tab is numeric, format as "Tab #N" to match Zellij's naming
             (if (string-match-p "^[0-9]+$" tab)
-                (string-to-number tab)
+                (format "Tab #%s" tab)
               tab)
             (string-to-number pane)))))
 
@@ -88,11 +89,12 @@ Uses header arguments or org properties to determine target."
          (session (alist-get :zellij-session params))
          (tab (alist-get :zellij-tab params))
          (pane (alist-get :zellij-pane params))
-         ;; Parse tab if string
+         ;; Parse tab - convert numeric strings to "Tab #N" format
          (tab-parsed (when tab
-                      (if (numberp tab) tab
+                      (if (numberp tab)
+                          (format "Tab #%d" tab)
                         (if (string-match-p "^[0-9]+$" tab)
-                            (string-to-number tab)
+                            (format "Tab #%s" tab)
                           tab))))
          (pane-parsed (when pane
                        (if (numberp pane) pane
@@ -122,9 +124,10 @@ Sends the block content as text without adding newline."
          (tab (alist-get :zellij-tab params))
          (pane (alist-get :zellij-pane params))
          (tab-parsed (when tab
-                      (if (numberp tab) tab
+                      (if (numberp tab)
+                          (format "Tab #%d" tab)
                         (if (string-match-p "^[0-9]+$" tab)
-                            (string-to-number tab)
+                            (format "Tab #%s" tab)
                           tab))))
          (pane-parsed (when pane
                        (if (numberp pane) pane

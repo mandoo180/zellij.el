@@ -423,6 +423,49 @@ Returns non-nil on success."
           (zellij--log "ERROR: Target tab not found: %s" tab)
           nil)))))
 
+(defun zellij--send-with-navigation (tab pane-offset text &optional session)
+  "Navigate to TAB/PANE-OFFSET and send TEXT in a single command chain.
+This avoids focus switching back between navigation and sending."
+  (zellij--log "Sending with navigation: tab=%s pane=%d" tab pane-offset)
+
+  ;; First, get the layout to calculate pane cycling
+  (let* ((layout (zellij--parse-layout session))
+         (target-tab (cl-find-if (lambda (t-info)
+                                  (if (numberp tab)
+                                      (= (nth 0 t-info) tab)
+                                    (equal (nth 1 t-info) tab)))
+                                layout)))
+    (if (not target-tab)
+        (zellij--log "ERROR: Target tab not found: %s" tab)
+      (let* ((panes (nth 3 target-tab))
+             (current-pane-offset (or (cl-position-if (lambda (pane)
+                                                       (nth 2 pane))
+                                                     panes)
+                                     0))
+             (cycles-needed (mod (- pane-offset current-pane-offset)
+                                (length panes)))
+             ;; Build command chain: go-to-tab && focus-next-pane (N times) && write-chars
+             (tab-cmd (if (numberp tab)
+                         (format "zellij action go-to-tab %d" tab)
+                       (format "zellij action go-to-tab-name \"%s\"" tab)))
+             (focus-cmds (mapconcat (lambda (_) "zellij action focus-next-pane")
+                                   (number-sequence 1 cycles-needed)
+                                   " && "))
+             (write-cmd (format "zellij action write-chars \"%s\" && zellij action write-bytes '[10]'"
+                               (replace-regexp-in-string "\"" "\\\\\"" text)))
+             (full-cmd (if (> cycles-needed 0)
+                          (format "%s && %s && %s" tab-cmd focus-cmds write-cmd)
+                        (format "%s && %s" tab-cmd write-cmd))))
+
+        (zellij--log "Executing chained command")
+        (zellij--log "Cycles needed: %d" cycles-needed)
+
+        ;; Execute the entire command chain at once
+        (let ((result (shell-command-to-string full-cmd)))
+          (zellij--log "Command chain executed")
+          (when (and result (not (string-empty-p result)))
+            (zellij--log "Output: %s" result)))))))
+
 ;;;; Layout Parsing
 
 (defun zellij--parse-layout (&optional session)
@@ -866,12 +909,9 @@ Validates that the target pane exists and clears it if not."
     ;; Validate pane exists
     (if (zellij--pane-exists-p tab pane-offset session)
         (progn
-          (zellij--log "Pane exists, navigating...")
-          (when (zellij--navigate-to-pane tab pane-offset session)
-            ;; Small delay to ensure navigation completed
-            (sleep-for 0.05)
-            (zellij--log "Sending command to focused pane")
-            (zellij-send-command formatted-text session)))
+          (zellij--log "Pane exists, sending with navigation...")
+          ;; Send navigation and text together to avoid focus switching back
+          (zellij--send-with-navigation tab pane-offset formatted-text session))
       ;; Pane no longer exists - clear target
       (zellij--log "ERROR: Pane does not exist!")
       (when (and zellij-target-pane

@@ -1,5 +1,5 @@
 #+TITLE: Zellij.el Demo
-#+PROPERTY: ZELLIJ_TAB 8
+#+PROPERTY: ZELLIJ_TAB 11
 #+PROPERTY: ZELLIJ_PANE 0
 
 * Setup
@@ -34,7 +34,7 @@ greet("Emacs");
 
 ** Using Header Arguments
 
-#+begin_src python :zellij-tab 9 :zellij-pane 1
+#+begin_src python :zellij-tab 10 :zellij-pane 0
 # This goes to a different pane
 print("Different pane!")
 #+end_src

@@ -20,8 +20,17 @@
   - Increased tab switch delay from 0.1s to 0.2s for more reliable focus detection
   - Navigation now defaults to pane 0 if no focused pane is detected (instead of failing)
   - Added explicit error handling for when target tab is not found
+  - **FINAL FIX**: Text was still being sent to wrong pane due to focus switching back
+  - Root cause: Commands sent from Emacs (in Tab #9) caused Zellij to switch focus back before text was sent
+  - Solution: Chain all commands in single shell execution (=go-to-tab-name && focus-next-pane && write-chars=)
+  - This prevents focus from switching back between navigation and sending
+  - New =zellij--send-with-navigation= function handles atomic navigation + send
 - Fixed read-only buffer error when logging to =*Zellij Log*= buffer
   - Log function now properly disables read-only mode when writing
+- Fixed org-mode integration treating numeric tab properties as indices instead of tab names
+  - =#+PROPERTY: ZELLIJ_TAB 11= now correctly maps to "Tab #11" (tab name) instead of tab index 11
+  - Same fix applied to header arguments =:zellij-tab 11=
+  - This ensures org-mode targets match Zellij's actual tab naming convention
 
 ** Features
 
